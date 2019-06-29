@@ -15,6 +15,7 @@ import (
 )
 
 var llog = logger.GetLogger(logger.INFO, "AWSREADERS")
+var debug = false
 
 // QueueReaderContext is the context for QueueReader
 //
@@ -51,7 +52,20 @@ func QueueReaderWithContext(ctx *QueueReaderContext) chan string {
 		QueueName: aws.String(ctx.Queue),
 	}).Send(context.TODO())
 	if err != nil {
-		llog.Warning("Invalid queue name %v: %v", ctx.Queue, err)
+		llog.Warning("Invalid queue name %q: %v", ctx.Queue, err)
+
+		if debug {
+			resp, err := ctx.Client.ListQueuesRequest(&sqs.ListQueuesInput{}).Send(context.TODO())
+			if err != nil {
+				llog.Warning("Error listing queues")
+			} else {
+				llog.Debug("Available queues:")
+				for _, q := range resp.QueueUrls {
+					llog.Debug("  %v", q)
+				}
+			}
+		}
+
 		return nil
 	}
 
@@ -151,4 +165,12 @@ func BucketReader(bucket, prefix, delim, start string, max int, short bool) chan
 	}()
 
 	return ch
+}
+
+// Enable additional debug logging
+func Debug(d bool) {
+	debug = d
+	if debug {
+		llog.SetLevel(logger.DEBUG)
+	}
 }
