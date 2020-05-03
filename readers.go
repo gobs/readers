@@ -60,7 +60,7 @@ func LineReader(r io.Reader) chan string {
 
 // SQLReader returns a "list" of results from the specified queury
 func SQLReader(db *sql.DB, query string) chan string {
-	ch := make(chan string)
+	ch := make(chan string, 10)
 
 	rows, err := db.Query(query)
 	if err != nil {

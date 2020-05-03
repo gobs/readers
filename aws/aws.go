@@ -98,7 +98,7 @@ func QueueReaderWithContext(ctx *QueueReaderContext) chan string {
 				WaitTimeSeconds: aws.Int64(20),
 			}).Send(context.TODO())
 			if err != nil {
-				llog.Warning("Receive %v: %v", ctx.Queue, err)
+				llog.Warning("Receive %q: %v", ctx.Queue, err)
 				time.Sleep(20 * time.Second)
 			} else if len(resp.Messages) > 0 {
 				llog.Debug("Receive from %q, got %v", ctx.Queue, len(resp.Messages))
@@ -158,7 +158,7 @@ func BucketReader(bucket, prefix, delim, start string, max int, short bool) chan
 		}
 
 		if err := p.Err(); err != nil {
-			llog.Warning("error on page %v:", pageno, err)
+			llog.Warning("error on page %v: %v", pageno, err)
 		}
 
 		close(ch)
