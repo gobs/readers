@@ -36,8 +36,8 @@ func TestScanArgs(test *testing.T) {
 	test_output := []string{}
 
 	scanner := ScanArgs(test_input)
-        
-        for scanner.Scan() {
+
+	for scanner.Scan() {
 		test_output = append(test_output, scanner.Text())
 	}
 
@@ -59,8 +59,8 @@ func TestScanReader(test *testing.T) {
 	}
 
 	scanner := ScanReader(binput)
-        
-        for scanner.Scan() {
+
+	for scanner.Scan() {
 		test_output = append(test_output, scanner.Text())
 	}
 

@@ -3,7 +3,6 @@ package readers
 import (
 	"bufio"
 	"database/sql"
-	"fmt"
 	"io"
 	"strings"
 
@@ -70,16 +69,43 @@ func SQLReader(db *sql.DB, query string) chan string {
 
 	go func() {
 		defer rows.Close()
+		var vp []interface{}
+		var vals []string
 
 		for rows.Next() {
-			var v interface{}
-			err = rows.Scan(&v)
+			var v string
+
+			cols, err := rows.Columns()
 			if err != nil {
-				logger.Warning("Scan: %s", err.Error())
-				continue
+				logger.Fatal("rows.Columns: %v", err)
 			}
 
-			ch <- fmt.Sprintf("%v", v)
+			l := len(cols)
+
+			if l == 1 {
+				err = rows.Scan(&v)
+				if err != nil {
+					logger.Warning("Scan: %s", err.Error())
+					continue
+				}
+			} else {
+				if vals == nil {
+					vp = make([]interface{}, l)
+					vals = make([]string, l)
+					for i := 0; i < l; i++ {
+						vp[i] = &vals[i]
+					}
+				}
+				err = rows.Scan(vp...)
+				if err != nil {
+					logger.Warning("Scan: %s", err.Error())
+					continue
+				}
+
+				v = strings.Join(vals, " ")
+			}
+
+			ch <- v
 		}
 
 		close(ch)

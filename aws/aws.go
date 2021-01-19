@@ -158,7 +158,7 @@ func BucketReader(bucket, prefix, delim, start string, max int, short bool) chan
 		}
 
 		if err := p.Err(); err != nil {
-			llog.Warning("error on page %v:", pageno, err)
+			llog.Warning("error on page %v: %v", pageno, err)
 		}
 
 		close(ch)
