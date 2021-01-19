@@ -8,9 +8,10 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/aws/external"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/gobs/logger"
 )
 
@@ -25,7 +26,7 @@ var debug = false
 type QueueReaderContext struct {
 	Queue  string
 	Client *sqs.Client
-	Last   *sqs.Message
+	Last   *types.Message
 }
 
 // QueueReader returns a list of messages read from the input SQS queue.
@@ -33,13 +34,13 @@ type QueueReaderContext struct {
 // Note that it always releases the old message when asking for a new one. If the client wants control
 // on the old message it should use QueueReaderWithContext instead.
 func QueueReader(queue string) chan string {
-	awscfg, err := external.LoadDefaultAWSConfig()
+	awscfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
 		llog.Warning("cannot get AWS configuration: %v", err)
 		return nil
 	}
 
-	client := sqs.New(awscfg)
+	client := sqs.NewFromConfig(awscfg)
 	return QueueReaderWithContext(&QueueReaderContext{Queue: queue, Client: client})
 }
 
@@ -48,14 +49,12 @@ func QueueReader(queue string) chan string {
 // It will normally release the last message before fetching a new one. If the client wants to "keep"
 // the last message (so that it gets re-delivered) it should set ctx.Last = nil before fetching a new message.
 func QueueReaderWithContext(ctx *QueueReaderContext) chan string {
-	resp, err := ctx.Client.GetQueueUrlRequest(&sqs.GetQueueUrlInput{
-		QueueName: aws.String(ctx.Queue),
-	}).Send(context.TODO())
+	resp, err := ctx.Client.GetQueueUrl(context.TODO(), &sqs.GetQueueUrlInput{QueueName: aws.String(ctx.Queue)})
 	if err != nil {
 		llog.Warning("Invalid queue name %q: %v", ctx.Queue, err)
 
 		if debug {
-			resp, err := ctx.Client.ListQueuesRequest(&sqs.ListQueuesInput{}).Send(context.TODO())
+			resp, err := ctx.Client.ListQueues(context.TODO(), &sqs.ListQueuesInput{})
 			if err != nil {
 				llog.Warning("Error listing queues")
 			} else {
@@ -83,20 +82,20 @@ func QueueReaderWithContext(ctx *QueueReaderContext) chan string {
 			 * something failed and we want to retry".
 			 */
 			if ctx.Last != nil {
-				if _, err := ctx.Client.DeleteMessageRequest(&sqs.DeleteMessageInput{
+				if _, err := ctx.Client.DeleteMessage(context.TODO(), &sqs.DeleteMessageInput{
 					QueueUrl:      queueUrl,
 					ReceiptHandle: ctx.Last.ReceiptHandle,
-				}).Send(context.TODO()); err != nil {
+				}); err != nil {
 					llog.Warning("Delete message: %v", err)
 				}
 
 				ctx.Last = nil
 			}
 
-			resp, err := ctx.Client.ReceiveMessageRequest(&sqs.ReceiveMessageInput{
+			resp, err := ctx.Client.ReceiveMessage(context.TODO(), &sqs.ReceiveMessageInput{
 				QueueUrl:        queueUrl,
-				WaitTimeSeconds: aws.Int64(20),
-			}).Send(context.TODO())
+				WaitTimeSeconds: 20,
+			})
 			if err != nil {
 				llog.Warning("Receive %q: %v", ctx.Queue, err)
 				time.Sleep(20 * time.Second)
@@ -104,7 +103,7 @@ func QueueReaderWithContext(ctx *QueueReaderContext) chan string {
 				llog.Debug("Receive from %q, got %v", ctx.Queue, len(resp.Messages))
 				m := resp.Messages[0]
 				ctx.Last = &m
-				ch <- aws.StringValue(m.Body)
+				ch <- aws.ToString(m.Body)
 			} else {
 				llog.Debug("Waiting on %q", ctx.Queue)
 			}
@@ -119,46 +118,45 @@ func QueueReaderWithContext(ctx *QueueReaderContext) chan string {
 // BucketReader returns a "list" of object names as read by listing the input S3 bucket.
 // if "short" is false each line contains the object info (key lastModified size)
 func BucketReader(bucket, prefix, delim, start string, max int, short bool) chan string {
-	awscfg, err := external.LoadDefaultAWSConfig()
+	awscfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
 		llog.Warning("cannot get AWS configuration: %v", err)
 		return nil
 	}
 
-	client := s3.New(awscfg)
+	client := s3.NewFromConfig(awscfg)
 	ch := make(chan string)
 
 	go func() {
-		req := client.ListObjectsV2Request(&s3.ListObjectsV2Input{
+
+		p := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{
 			Bucket:     aws.String(bucket), // Required
 			Delimiter:  aws.String(delim),
-			MaxKeys:    aws.Int64(1),
+			MaxKeys:    1,
 			Prefix:     aws.String(prefix),
 			StartAfter: aws.String(start),
 		})
-
-		p := s3.NewListObjectsV2Paginator(req)
 		pageno := 0
 
-		for p.Next(context.TODO()) {
-			page := p.CurrentPage()
+		for p.HasMorePages() {
+			page, err := p.NextPage(context.TODO())
 			pageno += 1
+                        if err != nil {
+                                llog.Warning("error on page %v: %v", pageno, err)
+                                break
+                        }
 
 			for _, v := range page.Contents {
 				if short {
-					ch <- aws.StringValue(v.Key)
+					ch <- aws.ToString(v.Key)
 				} else {
 					ch <- strings.Join([]string{
-						aws.StringValue(v.Key),
-						aws.TimeValue(v.LastModified).String(),
-						strconv.FormatInt(aws.Int64Value(v.Size), 10)},
+						aws.ToString(v.Key),
+						aws.ToTime(v.LastModified).String(),
+						strconv.FormatInt(v.Size, 10)},
 						" ")
 				}
 			}
-		}
-
-		if err := p.Err(); err != nil {
-			llog.Warning("error on page %v: %v", pageno, err)
 		}
 
 		close(ch)
