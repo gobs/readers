@@ -64,7 +64,7 @@ func SQLReader(db *sql.DB, query string) chan string {
 
 	rows, err := db.Query(query)
 	if err != nil {
-		logger.Error("Query error: %s", err.Error())
+		logger.Error("Query error: %s in %q", err.Error(), query)
 		return nil
 	}
 
