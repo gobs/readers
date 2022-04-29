@@ -27,6 +27,7 @@ type QueueReaderContext struct {
 	Queue  string
 	Client *sqs.Client
 	Last   *types.Message
+	Wait   bool
 }
 
 // QueueReader returns a list of messages read from the input SQS queue.
@@ -41,7 +42,23 @@ func QueueReader(queue string) chan string {
 	}
 
 	client := sqs.NewFromConfig(awscfg)
-	return QueueReaderWithContext(&QueueReaderContext{Queue: queue, Client: client})
+	return QueueReaderWithContext(&QueueReaderContext{Queue: queue, Client: client, Wait: true})
+}
+
+// QueueReaderWait returns a list of messages read from the input SQS queue.
+// The wait flag controls if terminate when the queue is empty or wait for new message.
+//
+// Note that it always releases the old message when asking for a new one. If the client wants control
+// on the old message it should use QueueReaderWithContext instead.
+func QueueReaderWait(queue string, wait bool) chan string {
+	awscfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		llog.Warning("cannot get AWS configuration: %v", err)
+		return nil
+	}
+
+	client := sqs.NewFromConfig(awscfg)
+	return QueueReaderWithContext(&QueueReaderContext{Queue: queue, Client: client, Wait: wait})
 }
 
 // QueueReaderWithContext returns a list of messages read from the input SQS queue.
@@ -104,8 +121,11 @@ func QueueReaderWithContext(ctx *QueueReaderContext) chan string {
 				m := resp.Messages[0]
 				ctx.Last = &m
 				ch <- aws.ToString(m.Body)
-			} else {
+			} else if ctx.Wait {
 				llog.Debug("Waiting on %q", ctx.Queue)
+			} else {
+				llog.Debug("Queue %q empty", ctx.Queue)
+				break
 			}
 		}
 
@@ -141,10 +161,10 @@ func BucketReader(bucket, prefix, delim, start string, max int, short bool) chan
 		for p.HasMorePages() {
 			page, err := p.NextPage(context.TODO())
 			pageno += 1
-                        if err != nil {
-                                llog.Warning("error on page %v: %v", pageno, err)
-                                break
-                        }
+			if err != nil {
+				llog.Warning("error on page %v: %v", pageno, err)
+				break
+			}
 
 			for _, v := range page.Contents {
 				if short {
