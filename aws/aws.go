@@ -152,7 +152,7 @@ func BucketReader(bucket, prefix, delim, start string, max int, short bool) chan
 		p := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{
 			Bucket:     aws.String(bucket), // Required
 			Delimiter:  aws.String(delim),
-			MaxKeys:    1,
+			MaxKeys:    aws.Int32(1),
 			Prefix:     aws.String(prefix),
 			StartAfter: aws.String(start),
 		})
@@ -173,7 +173,7 @@ func BucketReader(bucket, prefix, delim, start string, max int, short bool) chan
 					ch <- strings.Join([]string{
 						aws.ToString(v.Key),
 						aws.ToTime(v.LastModified).String(),
-						strconv.FormatInt(v.Size, 10)},
+						strconv.FormatInt(aws.ToInt64(v.Size), 10)},
 						" ")
 				}
 			}
